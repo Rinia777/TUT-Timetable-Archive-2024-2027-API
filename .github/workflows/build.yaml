@@ -1,0 +1,186 @@
+name: Deploy
+
+on:
+  schedule:
+    # JST 03:40 on Mar 1st. Run both possible UTC dates and gate by JST date below.
+    - cron: "40 18 28,29 2 *"
+  workflow_dispatch:
+
+jobs:
+  check_schedule:
+    runs-on: ubuntu-latest
+
+    outputs:
+      should_run: ${{ steps.jst.outputs.should_run }}
+
+    steps:
+      - name: Check JST schedule date
+        id: jst
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$(TZ=Asia/Tokyo date +'%m-%d %H:%M')" = "03-01 03:40" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fetch_lecture_codes:
+    needs: check_schedule
+    if: needs.check_schedule.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        year: [2024, 2025, 2026, 2027]
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: "pip"
+      - run: pip install --upgrade pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade get-chrome-driver
+          pip install -r requirements.txt
+
+      - name: Pull latest changes
+        run: git pull
+
+      - name: Generate lecture codes
+        run: python generate.py --type=lecture_codes --year=${{ matrix.year }}
+        
+      - name: Check diff
+        id: diff
+        run: |
+          git add -N .
+          git diff --name-only --exit-code
+        continue-on-error: true
+
+      - name: Commit and push to GitHub if needed
+        if: steps.diff.outcome == 'failure'
+        # https://github.com/actions/checkout/issues/13#issuecomment-724415212
+        run: |
+          set -x
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .
+          git commit --author="github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" -m "Automatically committed - lecture codes"
+          git push
+
+  fetch_lecture_data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    needs: fetch_lecture_codes
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        year: [2024, 2025, 2026, 2027]
+        type: [BT, CS, MS, ES, ESE5, ESE6, ESE7, X1, DS, HS, HSH1, HSH2, HSH3, HSH4, HSH5, HSH6, X3, GF, GH]
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: "pip"
+      - run: pip install --upgrade pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade get-chrome-driver
+          pip install -r requirements.txt
+
+      - name: Pull latest changes
+        run: git pull
+
+      - name: Generate lecture data
+        run: python generate.py --type=lecture_data --department=${{ matrix.type }} --year=${{ matrix.year }}
+        
+      - name: Check diff
+        id: diff
+        run: |
+          git add -N .
+          git diff --name-only --exit-code
+        continue-on-error: true
+
+      - name: Commit and push to GitHub if needed
+        if: steps.diff.outcome == 'failure'
+        # https://github.com/actions/checkout/issues/13#issuecomment-724415212
+        run: |
+          set -x
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .
+          git commit --author="github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" -m "Automatically committed - lecture data"
+          git push
+
+  build_indexes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    needs: fetch_lecture_data
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        year: [2024, 2025, 2026, 2027]
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: "pip"
+      - run: pip install --upgrade pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade get-chrome-driver
+          pip install -r requirements.txt
+
+      - name: Pull latest changes
+        run: git pull
+
+      - name: Build search indexes
+        run: python generate.py --type=indexes --year=${{ matrix.year }}
+
+      - name: Check diff
+        id: diff
+        run: |
+          git add -N .
+          git diff --name-only --exit-code
+        continue-on-error: true
+
+      - name: Commit and push to GitHub if needed
+        if: steps.diff.outcome == 'failure'
+        # https://github.com/actions/checkout/issues/13#issuecomment-724415212
+        run: |
+          set -x
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .
+          git commit --author="github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" -m "Automatically committed - search indexes"
+          git push

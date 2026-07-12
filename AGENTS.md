@@ -12,7 +12,8 @@
 - `output/lecture_codes_by_year.json`: 年度別の時間割コード一覧です。この archive repo では 2024-2027 年度だけを対象にします。
 - `docs/api/v1/archive/{year}/all/*.json`: 2024-2027 年度の年度指定 API 用の生成済み講義 JSON です。過去データは削除しません。
 - `docs/api/v1/archive/{year}/search-index/{department}.json`: 2024-2027 年度の年度別アーカイブの学部別サーチインデックスです。
-- `.github/workflows/build.yaml`: 年一回の定期更新と手動実行のワークフローです。
+- `scripts/import_archive_year.py`: 現行 API から確定済み年度の詳細 JSON、search-index、講義コード一覧を検証してコピーします。
+- `.github/workflows/build.yaml`: 毎年3月31日に現行 API から2年前の大学年度をコピーするワークフローです。
 
 ## セットアップ
 
@@ -73,6 +74,9 @@ python main.py
 - API レスポンスのキーは利用者向けの契約です。特に `courceDetails` はスペルミスに見えますが、既存 API のキーなので、互換性の意図なしに `courseDetails` へ変更しないでください。
 - この archive repo の対象年度は `generate.py` の `ARCHIVE_START_YEAR` から `ARCHIVE_END_YEAR` までです。現在年度に該当する年度は取得しません。年度別の詳細データは `docs/api/v1/archive/{year}/all` に書き込みます。学部別詳細 JSON は廃止済みです。
 - 過去データは削除しない方針です。生成ロジックを変える場合も、明示的な依頼なしに `docs/api/v1/archive` 配下の古い年度を消さないでください。
+- 定期アーカイブでは学外シラバスを再取得せず、`Rinia777/TUT-Timetable-API` の `docs/api/v1/archive/{year}` をコピーします。対象は実行時点の大学年度から2年前です。
+- コピー前後で全 JSON の構文、search-index の `count`、対象年度の講義コード一覧を検証します。検証に失敗したデータをコミットしないでください。
+- 現行年度専用の `search-index/manifest.json` は年度アーカイブへ追加しません。
 - `search-index` 配下のファイルは講義 JSON から作り直せる派生データです。索引生成では古い `search-index` ディレクトリだけを削除して再生成しますが、講義 JSON 本体は削除しません。
 - `output/lecture_codes_by_year.json` は講義データ生成の主な入力です。講義コード取得ロジックを変更したときは、このファイルと従来互換用の `output/lecture_codes.json` の差分を確認してください。
 - `src/get_timetable.py` は年度指定がない場合、現在年を基準にシラバス URL を作り、1 月から 3 月は前年度を取得します。年度境界の変更ではこの挙動に注意してください。
@@ -95,9 +99,9 @@ python generate.py --type=lecture_data --department=GF
 
 定期更新は `.github/workflows/build.yaml` で管理されています。
 
-1. `fetch_lecture_codes` job が 2024-2027 年度 matrix ごとに `python generate.py --type=lecture_codes --year=...` を実行します。講義コードが全学部分そろっている年度はスキップします。
-2. `fetch_lecture_data` job が年度と学部の matrix ごとに `python generate.py --type=lecture_data --department=... --year=...` を実行します。対象 JSON がすべて存在する年度・学部はスキップします。
-3. `build_indexes` job が 2024-2027 年度 matrix ごとに `python generate.py --type=indexes --year=...` を実行し、年度別アーカイブの学部別サーチインデックスを生成します。絞り込み対象の曜日、時限、曜日時限、`regularOrIntensive`、教員名、開講時期、対象学年、科目区分はサーチインデックス内のキーとして出力します。
-4. 差分があれば job ごとにコミットします。
+1. 毎年3月31日 JST 3:40 に現行 API リポジトリを読み取り専用で checkout します。
+2. 当日の大学年度から2年前（3月31日の暦年から3年前）を対象年度とします。
+3. 対象年度が 2024-2027 の範囲なら、詳細 JSON、search-index、年度別講義コードを検証してコピーします。範囲外なら安全にスキップします。
+4. コピー後の検証に成功し、差分がある場合だけコミットします。手動実行では対象年度を指定できます。
 
 workflow や学部リストを変える場合は、README の API 仕様に書かれた学部一覧も合わせて更新してください。
